@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Triangle Splatting Quick Setup Script for Ubuntu
-# Run this script via SSH or in a terminal
+# Fixed version with proper micromamba/conda handling
 
 set -e  # Exit on error
 
@@ -13,7 +13,7 @@ echo "========================================"
 echo "Step 1: Checking CUDA..."
 if ! command -v nvcc &> /dev/null; then
     echo "WARNING: CUDA not found. Please ensure CUDA is installed."
-    echo "You can install CUDA 12.6 from: https://developer.nvidia.com/cuda-downloads"
+    echo "You can install CUDA from: https://developer.nvidia.com/cuda-downloads"
     echo "Continuing setup anyway..."
 else
     nvcc --version
@@ -24,21 +24,8 @@ echo -e "\nStep 2: Installing system dependencies..."
 apt-get update
 apt-get install -y git build-essential python3.11 python3.11-venv python3.11-dev wget curl
 
-# Step 3: Install Micromamba if not present
-echo -e "\nStep 3: Setting up Micromamba..."
-if ! command -v micromamba &> /dev/null; then
-    echo "Installing Micromamba..."
-    curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
-    mkdir ~/micromamba
-    ./bin/micromamba shell init -s bash -p ~/micromamba
-    source ~/.bashrc
-    export PATH="$HOME/micromamba/bin:$PATH"
-else
-    echo "Micromamba already installed"
-fi
-
-# Step 4: Clone the repository with submodules
-echo -e "\nStep 4: Cloning Triangle Splatting repository..."
+# Step 3: Clone the repository with submodules
+echo -e "\nStep 3: Cloning Triangle Splatting repository..."
 if [ -d "triangle-splatting" ]; then
     echo "Repository already exists. Pulling latest changes..."
     cd triangle-splatting
@@ -49,11 +36,54 @@ else
     cd triangle-splatting
 fi
 
-# Step 5: Download requirements.yaml if not present
-echo -e "\nStep 5: Setting up environment..."
-if [ ! -f "requirements.yaml" ]; then
-    echo "Creating requirements.yaml..."
-    cat > requirements.yaml << 'EOF'
+# Step 4: Setup Python environment (choose method)
+echo -e "\nStep 4: Setting up Python environment..."
+echo "Choose installation method:"
+echo "1) Use pip with venv (simpler, recommended)"
+echo "2) Try to install/use micromamba"
+echo "3) Use existing conda/mamba"
+read -p "Enter choice (1-3): " choice
+
+case $choice in
+    1)
+        echo "Using Python venv with pip..."
+        python3.11 -m venv venv
+        source venv/bin/activate
+        
+        # Upgrade pip
+        pip install --upgrade pip
+        
+        # Install PyTorch with CUDA support
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+        
+        # Install other dependencies
+        pip install tqdm matplotlib plyfile opencv-python imageio imageio-ffmpeg lpips
+        
+        # Install submodules
+        cd submodules/diff-surfel-rasterization
+        pip install .
+        cd ../simple-knn
+        pip install .
+        cd ../..
+        
+        echo "Environment setup complete with venv!"
+        echo "To activate: source venv/bin/activate"
+        ;;
+        
+    2)
+        echo "Installing Micromamba..."
+        # Install micromamba using the official installer
+        "${SHELL}" <(curl -L micro.mamba.pm/install.sh)
+        
+        # Source the shell configuration
+        source ~/.bashrc
+        
+        # Create environment from requirements
+        echo "Creating micromamba environment..."
+        
+        # Create a minimal requirements.yaml if it doesn't exist
+        if [ ! -f "requirements.yaml" ]; then
+            cat > requirements.yaml << 'EOF'
 name: triangle-splatting
 channels:
   - conda-forge
@@ -61,7 +91,7 @@ channels:
   - nvidia
 dependencies:
   - python=3.11
-  - pytorch::pytorch=2.4.1
+  - pytorch::pytorch
   - pytorch::torchvision
   - conda-forge::tqdm
   - conda-forge::matplotlib
@@ -69,43 +99,71 @@ dependencies:
   - conda-forge::opencv
   - conda-forge::imageio
   - conda-forge::imageio-ffmpeg
-  - conda-forge::lpips
   - pip
   - pip:
-    - submodules/diff-surfel-rasterization
-    - submodules/simple-knn
+    - lpips
 EOF
-fi
+        fi
+        
+        micromamba create -f requirements.yaml -y
+        eval "$(micromamba shell hook --shell bash)"
+        micromamba activate triangle-splatting
+        
+        # Install submodules
+        cd submodules/diff-surfel-rasterization
+        pip install .
+        cd ../simple-knn
+        pip install .
+        cd ../..
+        
+        echo "Environment setup complete with micromamba!"
+        echo "To activate: micromamba activate triangle-splatting"
+        ;;
+        
+    3)
+        echo "Using existing conda/mamba installation..."
+        
+        # Check for conda or mamba
+        if command -v conda &> /dev/null; then
+            CONDA_CMD="conda"
+        elif command -v mamba &> /dev/null; then
+            CONDA_CMD="mamba"
+        else
+            echo "No conda or mamba found! Please install one first."
+            exit 1
+        fi
+        
+        # Create environment
+        $CONDA_CMD create -n triangle-splatting python=3.11 -y
+        source $(conda info --base)/etc/profile.d/conda.sh
+        conda activate triangle-splatting
+        
+        # Install PyTorch
+        $CONDA_CMD install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -y
+        
+        # Install other dependencies
+        $CONDA_CMD install tqdm matplotlib plyfile opencv imageio imageio-ffmpeg -c conda-forge -y
+        pip install lpips
+        
+        # Install submodules
+        cd submodules/diff-surfel-rasterization
+        pip install .
+        cd ../simple-knn
+        pip install .
+        cd ../..
+        
+        echo "Environment setup complete with $CONDA_CMD!"
+        echo "To activate: conda activate triangle-splatting"
+        ;;
+        
+    *)
+        echo "Invalid choice. Exiting."
+        exit 1
+        ;;
+esac
 
-# Step 6: Create and activate the environment
-echo -e "\nStep 6: Creating Micromamba environment..."
-eval "$(micromamba shell hook --shell bash)"
-micromamba create -f requirements.yaml -y
-micromamba activate triangle-splatting
-
-# Step 7: Compile CUDA kernels
-echo -e "\nStep 7: Compiling CUDA kernels..."
-if [ -f "compile.sh" ]; then
-    bash compile.sh
-else
-    echo "Creating compile.sh..."
-    cat > compile.sh << 'EOF'
-#!/bin/bash
-cd submodules/diff-surfel-rasterization
-python setup.py install
-cd ../..
-EOF
-    bash compile.sh
-fi
-
-# Step 8: Install simple-knn
-echo -e "\nStep 8: Installing simple-knn..."
-cd submodules/simple-knn
-pip install .
-cd ../..
-
-# Step 9: Verify installation
-echo -e "\nStep 9: Verifying installation..."
+# Step 5: Verify installation
+echo -e "\nStep 5: Verifying installation..."
 python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 
 echo "========================================"
@@ -113,7 +171,7 @@ echo "Setup Complete!"
 echo "========================================"
 echo ""
 echo "To use Triangle Splatting:"
-echo "1. Activate the environment: micromamba activate triangle-splatting"
+echo "1. Activate the environment (see message above)"
 echo "2. Train a model: python train.py -s <path_to_scenes> -m <output_model_path> --eval"
 echo "3. Render: python render.py -m <path_to_model>"
 echo ""
