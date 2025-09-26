@@ -21,8 +21,8 @@ fi
 
 # Step 2: Install system dependencies
 echo -e "\nStep 2: Installing system dependencies..."
-sudo apt-get update
-sudo apt-get install -y git build-essential python3.11 python3.11-venv python3.11-dev wget curl
+apt-get update
+apt-get install -y git build-essential python3.11 python3.11-venv python3.11-dev wget curl
 
 # Step 3: Install Micromamba if not present
 echo -e "\nStep 3: Setting up Micromamba..."
