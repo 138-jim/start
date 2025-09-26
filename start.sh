@@ -29,7 +29,7 @@ echo -e "\nStep 3: Setting up Micromamba..."
 if ! command -v micromamba &> /dev/null; then
     echo "Installing Micromamba..."
     curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
-    mkdir -p ~/micromamba
+    mkdir ~/micromamba
     ./bin/micromamba shell init -s bash -p ~/micromamba
     source ~/.bashrc
     export PATH="$HOME/micromamba/bin:$PATH"
